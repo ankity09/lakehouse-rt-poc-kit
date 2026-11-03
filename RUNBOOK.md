@@ -109,7 +109,7 @@ GRANT SELECT ON TABLE system.billing.usage TO `engineer@example.com`;
 GRANT SELECT ON TABLE system.billing.list_prices TO `engineer@example.com`;
 ```
 
-If `system.query.history` doesn't exist, an account admin needs to enable the `query` system schema. Databricks can help with that.
+If `system.query.history` doesn't exist, an account admin needs to enable the `query` system schema. Databricks can help with that. The kit's `sql/00_grants.sql` has these grants and the next step's in one file, plus two more that the table checks in step A10 need.
 
 ### A5. Create the POC schema for the log table (metastore admin)
 
@@ -134,7 +134,7 @@ The log table's full name is then `your_catalog.lakehouse_rt_poc.poc_runs`. Writ
 ### A7. Write the query file (POC engineer, with Databricks)
 
 1. Open `poc_queries.sql`. The instructions at the top of the file explain the format.
-2. Choose about 10 query shapes: the dashboard queries that are slowest, most frequent, or time out today. The README in the kit has SQL that finds them in your query history.
+2. Choose about 10 query shapes: the dashboard queries that are slowest, most frequent, or time out today. The kit's `sql/02_find_query_shapes.sql` finds them in your query history.
 3. For each shape, write **4 blocks**: a typical and a large time window, each for 2 tenants or filter values. The example below shows one shape.
 4. Each query should take less than 15 seconds to execute on an idle warehouse. The smoke test in step A9 shows you which ones don't; Databricks helps you optimize or narrow those.
 
@@ -187,7 +187,20 @@ If a query isn't OK:
 - **An error only on poc-rt:** the query uses something Lakehouse//RT doesn't support yet. Send the error to Databricks; together you'll rewrite or remove it.
 - **An error on both:** the query itself has a problem. Fix it in the query file.
 
-Setup is complete when the check says READY and every query is OK on both warehouses.
+### A10. Check and tune the dashboard tables (POC engineer, with Databricks)
+
+Both warehouses read the same tables, so tuning them helps both engines and keeps the comparison fair. Run the kit's SQL files in order, in the SQL editor, on poc-dbsql or another Databricks SQL warehouse. Don't use poc-rt: Lakehouse//RT runs only SELECT queries and can't read system tables.
+
+1. `sql/03_list_dashboard_tables.sql`: the tables your dashboards read.
+2. `sql/04_check_tables_for_lakehouse_rt.sql`: each table is a Unity Catalog managed table, with no row filters, column masks or ABAC policies.
+3. `sql/05_check_table_layout.sql`: partitioning, file sizes, clustering keys, how each table is written, and what predictive optimization already does.
+4. `sql/06_measure_queries.sql`: a "before" measurement of your 5 slowest query shapes.
+5. `sql/07_tune_tables.sql`: refresh statistics, add liquid clustering, and reorganize the data. These change how tables are stored, never what's in them. Get the table owner's sign-off, and run them off-peak.
+6. `sql/06_measure_queries.sql` again: the "after" measurement. These numbers are your tuned baseline.
+
+Then don't change the tables' layout until the tests are done. Before each test day, run OPTIMIZE on the tables so both warehouses read the same, compacted data.
+
+Setup is complete when the check says READY, every query is OK on both warehouses, and the tables are checked and tuned (A10).
 
 ---
 

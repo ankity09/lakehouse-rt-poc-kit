@@ -17,6 +17,8 @@ Everything runs inside your Databricks workspace, as you, with your permissions.
 | `poc_results.py` | A Databricks notebook that turns the test runs into three tables: latency, load and cost. | No |
 | `poc_queries.sql` | The query file: the dashboard queries the tests run, on both warehouses. | Yes, you fill it in |
 | `RUNBOOK.md` | The full step-by-step guide: setup, each test, troubleshooting and a test log. | No |
+| `sql/` | Numbered SQL files you run yourself: grants, workload numbers, checks on your tables, and tuning | Only the placeholders |
+| `LICENSE.md`, `SECURITY.md` | The license, and how to report a security issue | No |
 
 ### What the four modes of `poc_run_test` do
 
@@ -50,23 +52,12 @@ The full steps are in [RUNBOOK.md](RUNBOOK.md), Part A. In short:
 2. **Two warehouses, named exactly as below.** The notebooks look for these names. Tag both with `project` = `lakehouse-rt-poc`, and give the POC engineer **Can manage** on both.
    - `poc-dbsql`: Serverless, the size you run in production or one size smaller, minimum 1 and maximum 3 clusters, auto stop after 10 minutes (step A2)
    - `poc-rt`: Real-Time, query size Small, auto stop after 10 minutes (step A3). Ask your Databricks account team which autoscaling setting to use for the load tests.
-3. **Read access to three system tables** for the POC engineer: `system.query.history`, `system.billing.usage` and `system.billing.list_prices`. A metastore admin grants it (step A4).
-4. **A schema for the log table**, for example `your_catalog.lakehouse_rt_poc` (step A5).
-5. **Your dashboard tables tuned**, for example with liquid clustering and OPTIMIZE, so both warehouses read the same optimized tables.
+3. **Read access to the system tables** the tests and checks use. A metastore admin runs `sql/00_grants.sql` once (step A4).
+4. **A schema for the log table**, for example `your_catalog.lakehouse_rt_poc`. `sql/00_grants.sql` creates it too (step A5).
+5. **Your dashboard tables checked and tuned**, so both warehouses read the same optimized tables. See [step 3 below](#3-check-and-tune-your-tables).
 6. **Two numbers about your workload**, which you type into the notebook:
-   - **Busiest minute:** the most queries your dashboards sent in one minute so far. It sets the load-test rate. The SQL below finds it.
+   - **Busiest minute:** the most queries your dashboards sent in one minute so far. It sets the load-test rate. `sql/01_find_busiest_minute.sql` finds it.
    - **Client timeout:** how long your application waits for a query before giving up, in seconds, from 5 to 50. The default is 30.
-
-```sql
--- Your 10 busiest minutes on the warehouse your dashboards use, last 90 days
-SELECT date_trunc('MINUTE', start_time) AS minute, count(*) AS queries
-FROM system.query.history
-WHERE compute.warehouse_id = '<warehouse ID>'
-  AND start_time >= current_date() - INTERVAL 90 DAYS
-GROUP BY 1
-ORDER BY queries DESC
-LIMIT 10;
-```
 
 To find a warehouse ID, open **Compute**, then **SQL warehouses**, then the warehouse, then the **Connection details** tab. The ID is the last part of the **HTTP path** (`/sql/1.0/warehouses/<ID>`).
 
@@ -95,43 +86,27 @@ See [Import and export Databricks notebooks](https://docs.databricks.com/aws/en/
 
 ### 2. Write the query file
 
-1. Find your top dashboard query shapes with the SQL below. Run it in the SQL editor of the workspace your dashboards use, on any SQL warehouse except the one that serves them.
+1. Find your top dashboard query shapes with `sql/02_find_query_shapes.sql`. Run it in the SQL editor of the workspace your dashboards use, on any SQL warehouse except the one that serves them.
 2. Pick about 10 shapes: the slowest, the most frequent and the ones that time out.
 3. In `poc_queries.sql`, write 4 blocks for each shape: a typical and a large time window, each for 2 tenants or filter values. The instructions at the top of the file explain the format and the rules: real values, fixed dates, and SELECT queries only.
 4. Your filled-in query file stays in your workspace. Don't push it back to this repo.
 
-```sql
--- Top 25 query shapes on the warehouse your dashboards use, last 30 days.
--- Literals are masked, so the same dashboard query with different parameters groups together.
-WITH q AS (
-  SELECT *,
-    regexp_replace(
-      regexp_replace(statement_text, concat(chr(39), '[^', chr(39), ']*', chr(39)), '?'),
-      '[0-9]+', '#') AS shape
-  FROM system.query.history
-  WHERE compute.warehouse_id = '<warehouse ID>'
-    AND start_time >= current_date() - INTERVAL 30 DAYS
-    AND statement_type = 'SELECT'
-)
-SELECT
-  substr(sha2(shape, 256), 1, 12)                         AS shape_id,
-  count(*)                                                AS runs,
-  count_if(execution_status = 'CANCELED')                 AS canceled,
-  percentile_approx(total_duration_ms, 0.5)               AS p50_ms,
-  percentile_approx(total_duration_ms, 0.95)              AS p95_ms,
-  percentile_approx(coalesce(waiting_at_capacity_duration_ms, 0), 0.95) AS queue_wait_p95_ms,
-  round(avg(read_bytes) / power(1024, 2))                 AS avg_read_mb,
-  round(max(coalesce(spilled_local_bytes, 0)) / power(1024, 3), 1) AS max_spill_gib,
-  round(sum(total_duration_ms) / 3600000.0, 1)            AS total_query_hours,
-  any_value(statement_id)                                 AS example_statement_id,
-  substr(any_value(statement_text), 1, 400)               AS sample_sql
-FROM q
-GROUP BY shape
-ORDER BY total_query_hours DESC
-LIMIT 25;
-```
+### 3. Check and tune your tables
 
-### 3. Run the tests
+Both warehouses read the same tables, so checking and tuning them first helps both engines and keeps the comparison fair. Run the files in `sql/` in order, in the SQL editor, on any SQL warehouse except `poc-rt` unless the file says otherwise. Replace the placeholders in angle brackets first.
+
+| File | What it does | Changes anything? |
+|---|---|---|
+| `03_list_dashboard_tables.sql` | Lists the tables your dashboards read, from Unity Catalog lineage | No |
+| `04_check_tables_for_lakehouse_rt.sql` | Checks that each table is managed, with no row filters, column masks or ABAC policies | No |
+| `05_check_table_layout.sql` | Shows partitioning, file sizes, clustering keys, predictive optimization, and how each table is written | No |
+| `06_measure_queries.sql` | Measures your slowest queries. Run it before and after tuning | No |
+| `07_tune_tables.sql` | Refreshes statistics, adds liquid clustering and reorganizes the data. Pick the steps that fit each table | Yes: how tables are stored, never what's in them. Get the table owner's sign-off |
+| `08_smoke_test_on_lakehouse_rt.sql` | Reads each table on `poc-rt`: the final proof that Lakehouse//RT can read it | No |
+
+Then keep the tables' layout as it is until the tests are done, and run OPTIMIZE on them before each test day.
+
+### 4. Run the tests
 
 For every run:
 
@@ -161,7 +136,7 @@ Then run these in order:
 | 7 | `load` | `poc-rt` | `2x` | `15` | Test week 2 |
 | 8 (optional) | `load` | `poc-rt` | `5x` | `15` | Test week 2, for headroom |
 
-### 4. Read the results
+### 5. Read the results
 
 1. Wait 15 to 30 minutes after a test ends, because the query history takes that long to catch up.
 2. Open `poc_results`, connect it to **Serverless**, set **1. Log table** to the same table, and click **Run all**. If it says the query history isn't complete yet, wait 10 minutes and run it again.
@@ -187,3 +162,5 @@ Then run these in order:
 ## About this kit
 
 This kit is provided as-is to help you run a proof of concept. It isn't an official Databricks product. For help with a POC, contact your Databricks account team.
+
+It's licensed under the Databricks License: see [LICENSE.md](LICENSE.md). To report a security issue, see [SECURITY.md](SECURITY.md).
