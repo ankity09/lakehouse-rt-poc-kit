@@ -22,3 +22,10 @@ GRANT SELECT ON TABLE system.storage.predictive_optimization_operations_history 
 CREATE SCHEMA IF NOT EXISTS <your_catalog>.lakehouse_rt_poc COMMENT 'Lakehouse//RT POC test log';
 GRANT USE CATALOG ON CATALOG <your_catalog> TO `<engineer@example.com>`;
 GRANT USE SCHEMA, CREATE TABLE, SELECT, MODIFY ON SCHEMA <your_catalog>.lakehouse_rt_poc TO `<engineer@example.com>`;
+
+-- Optional: read access to the dashboard tables, if the POC engineer can't already read them.
+-- The table owner or a catalog admin runs these, for each schema the dashboards read (see 03_list_dashboard_tables.sql).
+-- Remove the leading -- to run them.
+-- GRANT USE CATALOG ON CATALOG <catalog> TO `<engineer@example.com>`;
+-- GRANT USE SCHEMA ON SCHEMA <catalog>.<schema> TO `<engineer@example.com>`;
+-- GRANT SELECT ON SCHEMA <catalog>.<schema> TO `<engineer@example.com>`;

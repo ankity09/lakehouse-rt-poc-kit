@@ -4,7 +4,8 @@
 -- Numbers and quoted values are masked, so the same dashboard query with different parameters counts as one shape.
 -- Pick about 10 for poc_queries.sql: the slowest, the most frequent and the ones that time out.
 -- Look at sample_sql for the columns each shape filters on. They're the candidates for clustering keys.
--- Replace <warehouse ID> (see 01_find_busiest_minute.sql). Run it on any SQL warehouse except poc-rt.
+-- sample_sql shows the first 400 characters. For the full SQL, use the second query in 06_measure_queries.sql.
+-- Replace <warehouse ID> (see 01_find_busiest_minute.sql). Run it in any workspace in the same region (the system tables cover them all), on any SQL warehouse except poc-rt.
 
 WITH q AS (
   SELECT *,

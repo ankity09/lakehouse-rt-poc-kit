@@ -44,6 +44,25 @@ Everything runs inside your Databricks workspace, as you, with your permissions.
 - Timing comes from each warehouse's own [query history](https://docs.databricks.com/aws/en/admin/system-tables/query-history), not from the notebook's stopwatch. DBUs come from the billing system table. Anyone who runs the same queries the same way gets the same numbers.
 - For every query, the row counts from the two warehouses are compared.
 
+## What happens when you click Run all
+
+In every mode, `poc_run_test`:
+
+1. Reads the boxes at the top of the notebook, and the query file in its own folder.
+2. Finds `poc-dbsql` and `poc-rt` by name. It never starts, stops or queries any other warehouse.
+3. Wraps each query so it returns one extra column with a unique tag (`poc_run_tag`). The answer is otherwise unchanged, but the result cache can't serve it, so every run is timed on the engine.
+4. Sends each query to the chosen warehouse through the Statement Execution API, and waits up to the client timeout (box 7). A query still running then is canceled and counted as timed out.
+5. Writes one row per query run to the log table: the run ID, the query label, the warehouse, the statement ID, the state, the rows returned, and the notebook's own start and end times.
+
+Then, by mode:
+
+- **check** looks at the settings, both warehouses, your permissions, the log table and the query file. The only query it sends is `SELECT 1`, to confirm you can use each warehouse.
+- **smoke** runs each query once.
+- **latency** stops and restarts the warehouse first, so round 1 is a true first touch, then runs every query 4 times, one at a time.
+- **load** first runs each query once as a warm-up, which isn't counted. Then it sends queries on a fixed schedule, cycling through the query file: the next query goes out on time whether or not earlier ones have finished, the way real users send them. The rate is your busiest minute (box 6) times the load rate (box 3). It prints progress every minute, and warns if it couldn't keep up with the schedule.
+
+`poc_results` then joins the log table to each warehouse's own query history on the statement ID, so every time it reports is the server's, including time spent waiting in the queue. Cost comes from the billing system table.
+
 ## What you need first
 
 The full steps are in [RUNBOOK.md](RUNBOOK.md), Part A. In short:
@@ -52,10 +71,11 @@ The full steps are in [RUNBOOK.md](RUNBOOK.md), Part A. In short:
 2. **Two warehouses, named exactly as below.** The notebooks look for these names. Tag both with `project` = `lakehouse-rt-poc`, and give the POC engineer **Can manage** on both.
    - `poc-dbsql`: Serverless, the size you run in production or one size smaller, minimum 1 and maximum 3 clusters, auto stop after 10 minutes (step A2)
    - `poc-rt`: Real-Time, query size Small, auto stop after 10 minutes (step A3). Ask your Databricks account team which autoscaling setting to use for the load tests.
-3. **Read access to the system tables** the tests and checks use. A metastore admin runs `sql/00_grants.sql` once (step A4).
-4. **A schema for the log table**, for example `your_catalog.lakehouse_rt_poc`. `sql/00_grants.sql` creates it too (step A5).
-5. **Your dashboard tables checked and tuned**, so both warehouses read the same optimized tables. See [step 3 below](#3-check-and-tune-your-tables).
-6. **Two numbers about your workload**, which you type into the notebook:
+3. **Read access to the system tables** the tests and checks use. A metastore admin runs `sql/00_grants.sql` once (step A4). The system tables cover every workspace in the region, so the POC workspace can read the history of the warehouse your dashboards use.
+4. **Read access to your dashboard tables** for the POC engineer, from the POC workspace: SELECT on the tables, plus USE CATALOG and USE SCHEMA. `sql/00_grants.sql` has optional lines for this, for the table owner to run.
+5. **A schema for the log table**, for example `your_catalog.lakehouse_rt_poc`. `sql/00_grants.sql` creates it too (step A5).
+6. **Your dashboard tables checked and tuned**, so both warehouses read the same optimized tables. See [step 3 below](#3-check-and-tune-your-tables).
+7. **Two numbers about your workload**, which you type into the notebook:
    - **Busiest minute:** the most queries your dashboards sent in one minute so far. It sets the load-test rate. `sql/01_find_busiest_minute.sql` finds it.
    - **Client timeout:** how long your application waits for a query before giving up, in seconds, from 5 to 50. The default is 30.
 
@@ -73,6 +93,8 @@ Either way, the two notebooks and `poc_queries.sql` must sit in the same folder.
 2. Paste this repository's URL, and click **Create Git folder**.
 3. `poc_run_test` and `poc_results` show up as notebooks, and `poc_queries.sql` as a file.
 
+If you pull an update from this repo later, save a copy of your query file first. Running the notebooks on serverless also adds a small environment header to them, which the Git folder shows as a change: discard those notebook changes before you pull.
+
 See [Create and manage Git folders](https://docs.databricks.com/aws/en/repos/git-operations-with-repos) and [Connect your Git provider to Databricks](https://docs.databricks.com/aws/en/repos/get-access-tokens-from-git-provider).
 
 **Option B: import the files**
@@ -86,10 +108,12 @@ See [Import and export Databricks notebooks](https://docs.databricks.com/aws/en/
 
 ### 2. Write the query file
 
-1. Find your top dashboard query shapes with `sql/02_find_query_shapes.sql`. Run it in the SQL editor of the workspace your dashboards use, on any SQL warehouse except the one that serves them.
+1. Find your top dashboard query shapes with `sql/02_find_query_shapes.sql`. You can run it in the SQL editor of any workspace in the same region as the warehouse your dashboards use, because the system tables cover every workspace in the region. Use any SQL warehouse except the one that serves the dashboards.
 2. Pick about 10 shapes: the slowest, the most frequent and the ones that time out.
-3. In `poc_queries.sql`, write 4 blocks for each shape: a typical and a large time window, each for 2 tenants or filter values. The instructions at the top of the file explain the format and the rules: real values, fixed dates, and SELECT queries only.
-4. Your filled-in query file stays in your workspace. Don't push it back to this repo.
+3. Get the full SQL of each shape you picked. `sample_sql` shows only the first 400 characters, so paste the shape's `example_statement_id` into the second query in `sql/06_measure_queries.sql`, which returns the whole statement.
+4. In `poc_queries.sql`, write 4 blocks for each shape: a typical and a large time window, each for 2 tenants or filter values. The instructions at the top of the file explain the format and the rules: real values, fixed dates, and SELECT queries only.
+5. For a new dashboard or endpoint that has no query history yet, write its queries by hand, in the same 4-block format.
+6. Your filled-in query file stays in your workspace. Don't push it back to this repo.
 
 ### 3. Check and tune your tables
 

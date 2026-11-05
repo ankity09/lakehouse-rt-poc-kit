@@ -109,7 +109,7 @@ GRANT SELECT ON TABLE system.billing.usage TO `engineer@example.com`;
 GRANT SELECT ON TABLE system.billing.list_prices TO `engineer@example.com`;
 ```
 
-If `system.query.history` doesn't exist, an account admin needs to enable the `query` system schema. Databricks can help with that. The kit's `sql/00_grants.sql` has these grants and the next step's in one file, plus two more that the table checks in step A10 need.
+If `system.query.history` doesn't exist, an account admin needs to enable the `query` system schema. Databricks can help with that. The kit's `sql/00_grants.sql` has these grants and the next step's in one file, plus two more that the table checks in step A10 need. It also has optional lines that give the engineer read access to the dashboard tables.
 
 ### A5. Create the POC schema for the log table (metastore admin)
 
@@ -134,7 +134,7 @@ The log table's full name is then `your_catalog.lakehouse_rt_poc.poc_runs`. Writ
 ### A7. Write the query file (POC engineer, with Databricks)
 
 1. Open `poc_queries.sql`. The instructions at the top of the file explain the format.
-2. Choose about 10 query shapes: the dashboard queries that are slowest, most frequent, or time out today. The kit's `sql/02_find_query_shapes.sql` finds them in your query history.
+2. Choose about 10 query shapes: the dashboard queries that are slowest, most frequent, or time out today. The kit's `sql/02_find_query_shapes.sql` finds them in your query history. For the full text of a shape, put its `example_statement_id` into the second query in `sql/06_measure_queries.sql`.
 3. For each shape, write **4 blocks**: a typical and a large time window, each for 2 tenants or filter values. The example below shows one shape.
 4. Each query should take less than 15 seconds to execute on an idle warehouse. The smoke test in step A9 shows you which ones don't; Databricks helps you optimize or narrow those.
 

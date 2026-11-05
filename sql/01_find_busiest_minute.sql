@@ -4,7 +4,7 @@
 -- Use the top value for "6. Busiest minute". It sets the load-test rate.
 -- Replace <warehouse ID>: open Compute, SQL warehouses, the warehouse, then Connection details.
 -- The ID is the last part of the HTTP path (/sql/1.0/warehouses/<ID>).
--- Run it on any SQL warehouse except poc-rt.
+-- Run it in any workspace in the same region (the system tables cover them all), on any SQL warehouse except poc-rt.
 
 SELECT date_trunc('MINUTE', start_time) AS minute,
        count(*)                         AS queries
